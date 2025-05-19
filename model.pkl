@@ -1,0 +1,110 @@
+import pandas as pd
+import numpy as np
+import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from datetime import datetime
+
+# Load your dataset
+df = pd.read_csv("Case_Information.csv", encoding="ISO-8859-1")
+print(df.columns)
+# Drop rows where 'status' or important inputs are missing
+df = df.dropna(subset=["status", "age", "sex", "date_announced", "home_quarantined", "date_of_onset_of_symptoms", "pregnant"])
+
+# Preprocess input features
+df["age"] = df["age"].astype(float)
+
+# Encode categorical features
+label_encoders = {}
+for col in ["sex", "home_quarantined", "pregnant", "date_announced", "date_of_onset_of_symptoms"]:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col].astype(str))
+    label_encoders[col] = le
+
+# Features and target
+X = df[["age", "sex", "date_announced", "home_quarantined", "date_of_onset_of_symptoms", "pregnant"]]
+y = df["status"]
+
+# Encode target
+target_encoder = LabelEncoder()
+y_encoded = target_encoder.fit_transform(y)
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42)
+
+# Initialize models
+logistic_model = LogisticRegression(max_iter=1000)
+svm_model = SVC(kernel='linear', probability=True)
+random_forest_model = RandomForestClassifier(n_estimators=100, random_state=42)
+
+# Train models
+logistic_model.fit(X_train, y_train)
+svm_model.fit(X_train, y_train)
+random_forest_model.fit(X_train, y_train)
+
+# Save models to .pkl files
+joblib.dump(logistic_model, "logistic_model.pkl")
+joblib.dump(svm_model, "svm_model.pkl")
+joblib.dump(random_forest_model, "random_forest_model.pkl")
+
+# Save label encoders too (for future use when predicting)
+joblib.dump(target_encoder, "target_encoder.pkl")
+joblib.dump(label_encoders, "input_label_encoders.pkl")
+
+print("✅ All 3 models and encoders saved as .pkl files.")
+
+
+def predict_status(input_data, model_name="Logistic Regression"):
+    # Load models and encoders
+    logistic_model = joblib.load("logistic_model.pkl")
+    svm_model = joblib.load("svm_model.pkl")
+    random_forest_model = joblib.load("random_forest_model.pkl")
+    target_encoder = joblib.load("target_encoder.pkl")
+    label_encoders = joblib.load("input_label_encoders.pkl")
+    
+    # Preprocess input data
+    # Example input: [age, sex, date_announced, home_quarantined, date_of_onset_of_symptoms, pregnant]
+    
+    # Convert categorical input data
+    input_data[1] = label_encoders["sex"].transform([input_data[1]])[0]  # sex
+    input_data[3] = label_encoders["home_quarantined"].transform([input_data[3]])[0]  # home_quarantined
+    input_data[5] = label_encoders["pregnant"].transform([input_data[5]])[0]  # pregnant
+    
+    # Convert dates to the number of days since a reference date
+    reference_date = datetime(2020, 1, 1)  # Reference date for conversion
+    
+    date_announced = datetime.strptime(input_data[2], "%m/%d/%y")
+    date_of_onset_of_symptoms = datetime.strptime(input_data[4], "%m/%d/%y")
+    
+    input_data[2] = (date_announced - reference_date).days  # date_announced
+    input_data[4] = (date_of_onset_of_symptoms - reference_date).days  # date_of_onset_of_symptoms
+
+    # Ensure the correct format (make input data into a 2D array)
+    input_data = np.array(input_data).reshape(1, -1)
+    
+    # Choose model based on model_name argument
+    if model_name == "Logistic Regression":
+        model = logistic_model
+    elif model_name == "SVM":
+        model = svm_model
+    elif model_name == "Random Forest":
+        model = random_forest_model
+    else:
+        raise ValueError("Model name must be one of: 'Logistic Regression', 'SVM', 'Random Forest'")
+    
+    # Predict the status
+    prediction = model.predict(input_data)[0]
+    
+    # Decode the prediction
+    decoded_prediction = target_encoder.inverse_transform([prediction])[0]
+    
+    return decoded_prediction
+
+
+# Example usage
+input_example = [50, "Male", "03/15/20", "yes", "03/20/20", "no"]
+predicted_status = predict_status(input_example, model_name="Logistic Regression")
+print(f"Predicted Status: {predicted_status}")
